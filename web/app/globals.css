@@ -1,0 +1,345 @@
+@import "tailwindcss";
+
+/*
+ * Falsifiable — the visual system.
+ *
+ * The product is a market on statements that can be checked.  So the interface
+ * is a docket: warm paper, ink, hairline rules, square corners, small-caps
+ * labels, tabular figures.  The one deliberate contrast in the whole design
+ * is between the two kinds of content:
+ *
+ *   - a *claim* is a sentence, so it is set in a serif;
+ *   - a *fact* (a digest, an address, an amount, a countdown) is machine
+ *     output, so it is set in a monospace.
+ *
+ * That contrast is the argument of the product: a human statement on one side,
+ * a machine record on the other.
+ */
+
+:root {
+  --paper: #f1eee5;
+  --paper-raised: #faf8f2;
+  --paper-sunk: #e7e2d3;
+  --ink: #191710;
+  --ink-mid: #524c3b;
+  --ink-soft: #7c7461;
+  --rule: #cec7b4;
+  --rule-strong: #a49b83;
+  --yes: #1e5a4e;
+  --yes-tint: #dbe9e3;
+  --no: #9a3324;
+  --no-tint: #f2dfd9;
+  --undet: #87671c;
+  --undet-tint: #f3e9cd;
+  --seal: #6f2b22;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-raised: var(--paper-raised);
+  --color-paper-sunk: var(--paper-sunk);
+  --color-ink: var(--ink);
+  --color-ink-mid: var(--ink-mid);
+  --color-ink-soft: var(--ink-soft);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-yes: var(--yes);
+  --color-yes-tint: var(--yes-tint);
+  --color-no: var(--no);
+  --color-no-tint: var(--no-tint);
+  --color-undet: var(--undet);
+  --color-undet-tint: var(--undet-tint);
+  --color-seal: var(--seal);
+
+  --font-serif: var(--font-newsreader);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+}
+
+html {
+  background-color: var(--paper);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* A faint ruled-paper texture, kept subtle enough to read as paper, not as
+   a background image. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(25, 23, 16, 0.022) 0px,
+    rgba(25, 23, 16, 0.022) 1px,
+    transparent 1px,
+    transparent 28px
+  );
+}
+
+main {
+  position: relative;
+  z-index: 1;
+}
+
+::selection {
+  background: var(--seal);
+  color: var(--paper-raised);
+}
+
+:focus-visible {
+  outline: 2px solid var(--seal);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- labels */
+
+.label {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.label-ink {
+  color: var(--ink-mid);
+}
+
+.num {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.serif {
+  font-family: var(--font-newsreader), Georgia, "Times New Roman", serif;
+}
+
+/* -------------------------------------------------------------- surfaces */
+
+.sheet {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+}
+
+.sheet-sunk {
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+}
+
+.hairline {
+  border-bottom: 1px solid var(--rule);
+}
+
+.docket-row {
+  border-bottom: 1px solid var(--rule);
+}
+
+.docket-row:last-child {
+  border-bottom: none;
+}
+
+/* ----------------------------------------------------------- status mark */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem 0.15rem 0.4rem;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.status::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  background: currentColor;
+  flex: none;
+}
+
+.status-open {
+  color: var(--ink-mid);
+  background: var(--paper-sunk);
+}
+.status-closed {
+  color: var(--undet);
+  background: var(--undet-tint);
+}
+.status-yes {
+  color: var(--yes);
+  background: var(--yes-tint);
+}
+.status-no {
+  color: var(--no);
+  background: var(--no-tint);
+}
+.status-undetermined {
+  color: var(--undet);
+  background: var(--undet-tint);
+}
+.status-refunded {
+  color: var(--seal);
+  background: var(--no-tint);
+}
+.status-unknown {
+  color: var(--ink-soft);
+  background: var(--paper-sunk);
+}
+
+/* ----------------------------------------------------------- pool split */
+
+.split {
+  display: flex;
+  height: 0.6rem;
+  border: 1px solid var(--rule-strong);
+  background: var(--paper-sunk);
+  overflow: hidden;
+}
+
+.split-yes {
+  background: var(--yes);
+}
+
+.split-no {
+  background: var(--no);
+}
+
+.split-none {
+  background: var(--rule);
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper-raised);
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.6rem 1rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms linear, color 120ms linear;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--seal);
+  border-color: var(--seal);
+}
+
+.btn:disabled {
+  background: var(--paper-sunk);
+  border-color: var(--rule);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+.btn-quiet {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--rule-strong);
+}
+
+.btn-quiet:hover:not(:disabled) {
+  background: var(--paper-sunk);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.btn-yes {
+  background: var(--yes);
+  border-color: var(--yes);
+}
+.btn-yes:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.btn-no {
+  background: var(--no);
+  border-color: var(--no);
+}
+.btn-no:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+/* ----------------------------------------------------------------- forms */
+
+.field {
+  width: 100%;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  color: var(--ink);
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.875rem;
+  padding: 0.6rem 0.7rem;
+}
+
+.field::placeholder {
+  color: var(--ink-soft);
+}
+
+/* --------------------------------------------------------------- blocks */
+
+.codeblock {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--ink);
+}
+
+.notice {
+  border-left: 3px solid var(--rule-strong);
+  padding: 0.6rem 0 0.6rem 0.85rem;
+}
+
+.notice-warn {
+  border-left-color: var(--undet);
+}
+
+.notice-error {
+  border-left-color: var(--no);
+}
+
+.notice-good {
+  border-left-color: var(--yes);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
