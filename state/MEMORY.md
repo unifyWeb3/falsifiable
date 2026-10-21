@@ -168,6 +168,40 @@ later (506 s in one measurement, 0 s in another read immediately).
 | `gl.get_contract_at` needs a real `Address` | `TypeError: address expected` | `Address(to)` |
 | a contract that raises still finalizes with `MAJORITY_AGREE` | a reverted call looks like a success | inspect `consensus_data.leader_receipt[0].result.raw` |
 
+### 2.7 Value transfer out of a contract, on Studio [VERIFIED]
+
+Three directions, three answers:
+
+| direction | observed |
+|---|---|
+| EOA → contract | **works** — 5 GEN landed, the contract's own balance went to 5 GEN |
+| contract → contract | **works** — the receiver's counter went 5 GEN → 6 GEN, the transfer tx reached `ACCEPTED / MAJORITY_AGREE` |
+| contract → **EOA** | **fails** — the transfer is posted, but the triggered tx ends `NO_MAJORITY` with *"Contract 0x… not found"*, and the value is deducted without being delivered |
+
+The Studio has no host layer, so a message to an address with no code is
+treated as a call to a contract that does not exist.  This is a **Studio
+limitation**: the contract's internal accounting is correct and is covered by
+the tests, and the same `emit_transfer` call is expected to route a plain
+transfer on a network with a full host layer — but that has **not** been
+tested here, so nothing in this repository claims it.
+
+### 2.8 Two front-end encoding traps [VERIFIED]
+
+Both were found by running the deployed app against the live contract, not by
+reading the code:
+
+* the **RLP byte-string header** must use the long form above 55 bytes.  The
+  short form (`0x80 + length`) above 55 produces a prefix that reads as a
+  *list* header, so any call whose calldata was longer than 55 bytes was
+  rejected by the node.  `get_market` (22 bytes) worked and `get_position`
+  (70 bytes) did not — a failure that looks like "some calls work".
+* the call object must **omit `kwargs`** when it is empty, exactly as the
+  Python SDK's `make_calldata_object` does.
+
+Both are now pinned by fixture tests in `web/lib/calldata.test.ts`, whose
+expected bytes were produced by the SDK itself.
+
+
 ---
 
 ## 3. Live Studio RPC notes [VERIFIED]
@@ -209,10 +243,45 @@ See `state/LIVE-RESULTS.md` for the transaction ids of every live step.
 
 ---
 
-## 6. Open items
+## 6. Delivered
 
-- [ ] Finish the live runs (YES / NO / UNDETERMINED / single-sided / double
-      withdraw).
-- [ ] Wire the deployed address into `web/` and check the UI in Chromium at
-      390×844 and 1280×900.
-- [ ] Pre-push sweep, public GitHub repo, Vercel deploy, final report.
+| | |
+|---|---|
+| GitHub | https://github.com/unifyWeb3/falsifiable (public) |
+| Vercel | https://falsifiable.vercel.app |
+| Contract | `0xdf426A429a9C9Ed25f2FF208aA81190dB3874822` on Studionet |
+| sha256 | `a3291155911ecfd93d817ecb153aea266818f94a930760c32f9952b06bc94e8b` (repo == deployed, byte identical) |
+
+### Verification numbers (all run, all green)
+
+| check | result |
+|---|---|
+| `pytest tests/ -q` | **64 passed**, exit 0 |
+| `npx tsx --test lib/*.test.ts` | **13 passed**, 0 failed |
+| `npx tsc --noEmit` | exit 0 |
+| `genvm-lint lint contracts/falsifiable.py` | ✓ Lint passed (2 checks), exit 0 |
+| `GENVMROOT=… genvm-lint check contracts/falsifiable.py` | ✓ Validation passed, 13 methods (8 view, 5 write), exit 0 |
+| `npx next build` | ✓ compiled, 7 routes, exit 0 |
+
+The one lint warning — `line 293: Non-deterministic call 'time.time()'` — is
+expected and explained: in GenLayer the clock is pinned to the transaction
+timestamp, which every validator shares (verified live, §2.4).
+
+### The Vercel project
+
+The project was created with `vercel project add`, which left `framework: null`
+and `ssoProtection: all_except_custom_domains`.  With the framework unset,
+Vercel served the deployment as 404 on every route, and with the protection on
+it redirected to the SSO page.  Both are project settings, fixed with
+`vercel api --method PATCH /v9/projects/falsifiable`:
+`{"framework":"nextjs"}` and `{"ssoProtection":null}`.  No redeploy was
+needed for the protection change; the framework change did need one.
+
+### What was deliberately not done
+
+* The GitHub repo is **not** connected to Vercel for automatic redeploys, so
+  that the deployment count stayed at one working deployment.
+* The three probe contracts (`contracts/probe_*.py`) are kept in the repo on
+  purpose: they are how the value-transfer, web-fetch and clock findings
+  above were established, and re-running them reproduces the evidence.
+
