@@ -84,11 +84,13 @@ export async function readContract(
   method: string,
   args: CalldataValue[] = [],
 ): Promise<CalldataValue> {
-  const payload = encodeCalldata({
-    method,
-    args,
-    kwargs: {},
-  });
+  // The object is built exactly the way the Python SDK builds it: `kwargs` is
+  // omitted when it is empty, and the keys are sorted by the encoder.  The
+  // node rejects the call if an empty `kwargs` map is included, so this must
+  // match the SDK byte for byte.
+  const call: { method: string; args?: CalldataValue[] } = { method };
+  if (args.length > 0) call.args = args;
+  const payload = encodeCalldata(call as unknown as CalldataValue);
   const serialized = rlpEncodeList([payload, Uint8Array.from([0])]);
   const result = await rpc<string>("gen_call", [
     {
@@ -122,15 +124,17 @@ export type TransactionState = {
 export async function getTransaction(txId: string): Promise<TransactionState> {
   const raw = await rpc<{
     status?: string | number;
+    status_name?: string;
     result?: string | number;
-  } | null>("gen_getTransactionByHash", [txId]);
+    result_name?: string;
+  } | null>("eth_getTransactionByHash", [txId]);
   if (!raw) {
     return { txId, status: "UNKNOWN", result: "UNKNOWN", present: false };
   }
   return {
     txId,
-    status: normaliseStatus(raw.status),
-    result: normaliseResult(raw.result),
+    status: raw.status_name ?? normaliseStatus(raw.status),
+    result: raw.result_name ?? normaliseResult(raw.result),
     present: true,
   };
 }

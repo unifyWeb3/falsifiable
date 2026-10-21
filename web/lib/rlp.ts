@@ -7,9 +7,12 @@
 
 function encodeBytes(bytes: Uint8Array): Uint8Array {
   if (bytes.length === 1 && bytes[0] < 0x80) return bytes;
-  const out = new Uint8Array(1 + bytes.length);
-  out[0] = 0x80 + bytes.length;
-  out.set(bytes, 1);
+  // A byte string longer than 55 bytes needs the long form: 0xb8 <len>.
+  // Using the short form above 55 produces a prefix that reads as a list.
+  const header = encodeLength(bytes.length, 0x80);
+  const out = new Uint8Array(header.length + bytes.length);
+  out.set(header, 0);
+  out.set(bytes, header.length);
   return out;
 }
 

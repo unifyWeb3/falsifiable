@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Falsifiable — the web front end
 
-## Getting Started
+A read-only front end for the Falsifiable stake market. It reads the
+GenLayer Studio chain over the public JSON-RPC endpoint and it **cannot
+write**: there is no key anywhere in this directory, and the configuration is
+public (`NEXT_PUBLIC_` variables only).
 
-First, run the development server:
+## Run it
 
 ```bash
+cp .env.example .env.local     # then set the contract address
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## What it does
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+* **The board** (`/`) — every market, its status, its pool split and its
+  countdown.
+* **A market** (`/market/<id>`) — the claim, the rule in full, the page, the
+  recorded evidence digest, the pool, and the actions the contract will
+  accept.
+* **Open a market** (`/open`) — builds the command that opens one.
+* **Trust** (`/trust`) — what is promised and what is still trusted.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Every write is handed to you as a copy-paste command to run with your own
+key. The site never sees a key and cannot move your money.
 
-## Learn More
+## The one rule about actions
 
-To learn more about Next.js, take a look at the following resources:
+The interface may only offer an action the contract will accept. That list
+comes from a single pure function, `deriveActions` in
+[`lib/market-state.ts`](lib/market-state.ts), and
+[`lib/market-state.test.ts`](lib/market-state.test.ts) parses
+`../contracts/falsifiable.py` and asserts the two agree — so the UI and the
+contract cannot drift apart.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npx tsx --test lib/market-state.test.ts
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Reading the chain
 
-## Deploy on Vercel
+The calldata codec in [`lib/calldata.ts`](lib/calldata.ts) and the RLP
+encoder in [`lib/rlp.ts`](lib/rlp.ts) are a direct port of the GenLayer
+Python SDK's encoding, so the app can call `gen_call` with nothing more than
+`fetch`. There is no SDK dependency and no server-side key.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+If the public configuration is missing, the app **fails closed**: it says
+the chain is unreachable instead of pretending it is empty.
