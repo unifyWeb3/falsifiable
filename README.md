@@ -20,6 +20,43 @@ payouts, and no owner.
 
 ---
 
+## Read this before you stake
+
+Four things, in plain words.
+
+**1. Paying out to your own account was NOT verified on Studio.** On the
+GenLayer Studio network a contract **cannot deliver native GEN to an
+externally-owned account**. The contract computes the payout correctly and
+writes it into its own ledger, but the Studio node has no host layer, so the
+delivery transaction ends `NO_MAJORITY` with *"Contract … not found"* and the
+value is deducted without arriving. This is a **network** limitation, not a
+bug in the contract, and this repository does not claim the payout works.
+[Details and the transaction ids](#what-was-actually-verified).
+
+**2. On Studio a failed delivery loses the value, and you cannot try again.**
+`withdraw` settles your position **first** and emits the transfer **second** —
+on purpose, so that a second call, or a re-entrant one, finds nothing to pay.
+That ordering is what stops double payment. It is also why a Studio payout
+failure is final: your position is already marked settled and the value has
+already left the contract, so a retry is refused with *"nothing to withdraw"*.
+Value **into** a contract and value **between** contracts both work on Studio;
+only the last hop, to a plain account, does not.
+
+**3. One key is one key.** The deployer key in this repository is a throwaway
+Studio testnet key. It is gitignored, it is never printed, and the contract
+gives it no powers beyond opening markets and staking. There is no owner
+function to abuse, no admin key, no upgrade path and no fee to skim. One key
+holds one key's worth of power, and that power is small.
+
+**4. Live-verified versus only-tested.** Everything in
+[What was actually verified](#what-was-actually-verified) marked **live** was
+run on a real network with real transactions, and the transaction ids are
+public. Everything marked *only by the test suite* was never run on a live
+network and is **not** claimed as live. Nothing in this README is asserted
+without a command that was run and whose output was read.
+
+---
+
 ## How it works
 
 ### A market is four things
@@ -162,6 +199,17 @@ is deducted without being delivered. Value **into** a contract and value
 expected to route a plain transfer on a network with a full host layer
 (Bradbury, mainnet), but that has not been tested here, so this repository
 does not claim it.
+
+**The loss is final on Studio, because the position is settled first.**
+`withdraw` marks the position settled and adds the amount to `total_paid`
+*before* it emits the transfer, so that a second call — or a re-entrant one —
+finds nothing to pay. When the Studio delivery then fails, the value has
+already left the contract and the position is already settled, so **there is
+nothing left to retry for**: a second `withdraw` is refused with *"nothing to
+withdraw"*. The contract cannot know the delivery failed, because the failure
+happens outside the contract, after it has already committed. That ordering is
+what prevents double payment; on a network without a host layer it is also
+why a failed payout is a loss rather than a delay.
 
 **Only by the test suite** (not on a live network):
 
