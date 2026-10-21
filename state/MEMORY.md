@@ -285,3 +285,63 @@ needed for the protection change; the framework change did need one.
   purpose: they are how the value-transfer, web-fetch and clock findings
   above were established, and re-running them reproduces the evidence.
 
+---
+
+## 7. Release-candidate review — session log
+
+A release candidate network was announced: **Studio studio-next.genlayer.com**,
+RPC `studio-next.genlayer.com/api`, chain id **61997**, CLI `genlayer@0.40.0-rc.3`,
+`genlayer-js@2.0.0-rc.1`, `genlayer-py==0.19.0rc2`, `genlayer-test==0.30.0rc2`,
+`genvm-linter==0.11.1rc2`, described as a release candidate for the
+**Consensus v0.6 fee implementation**.  The announcement was treated as
+UNVERIFIED until it was confirmed from official GenLayer sources.
+
+### Stage 1 — what is published [VERIFIED]
+
+| check | result |
+|---|---|
+| default branch | `master` (`git remote show origin` → `HEAD branch: master`) |
+| local HEAD | `195c13b` at the time of the check, then `ad0d35e` (the README fix) |
+| `origin/master` | identical to local HEAD at both points; `git log origin/master..HEAD` empty |
+| unpushed work | none — the only thing in the tree was untracked `state/SHOWCASE-COPY.md`, now committed |
+| live site | `https://falsifiable.vercel.app` → 200, board renders **11 markets** read from the Studionet contract |
+| Vercel → GitHub | **not connected**: `vercel api /v9/projects/falsifiable` has **no `link` key**; deployments are uploaded by the CLI |
+| deployment provenance | the production deployment records `githubCommitSha: 86a136068f815ca7c5efa2bcc9ec46f9830d4cab` — it was built from that pushed commit |
+| deployed code vs pushed code | `git diff --name-only 86a1360 HEAD -- web/` is **empty**: the only commit after the deployment touched `state/MEMORY.md`, so the served `web/` code is byte-identical to the pushed `web/` code |
+| the fix is really live | `GET /api/position?id=5&address=0x191489…` returns a real position (`yes=10 GEN`).  `get_position` is a 70-byte calldata, which is exactly the case that the pre-`86a1360` RLP short-form header broke.  The live endpoint therefore runs the **fixed** codec. |
+
+**Grep for a studied project's name / author / URL — empty.**  `reviewguard`,
+`phu1271997`, `review-guard`, `review_guard` return **no match** in the
+working tree (tracked + untracked), in `git log -p --all`, and in a scan of
+**every blob in every object reachable from every ref plus the reflog**
+(98 objects).  The only non-npm GitHub URLs in tracked files are
+`github.com/unifyWeb3/falsifiable` (ours) and `github.com/genlayerlabs/genvm`
+(official GenLayer).  `state/SHOWCASE-COPY.md` was untracked; it is ours and
+contains no external project name.
+
+**Secret sweep — clean.**
+
+| where | result |
+|---|---|
+| `git ls-files` | no key file, no `.env`; only `web/.env.example` (public config, no secret) and `scripts/keys.py` (the generator) |
+| working tree | the 4 live private keys appear **only** in `secrets/studionet_keys.json`, which is untracked, gitignored (`git check-ignore` → `.gitignore:6:secrets/`) and mode `600` |
+| all git refs | every 64-hex candidate in every blob/tree/commit of every ref and the reflog was compared against the real keys: **0 hits** |
+| mnemonics | none: the key file stores only raw private keys, no seed phrase |
+
+**README honesty — one gap found and fixed.**  The four required statements
+now sit near the top of the README under *Read this before you stake*:
+(1) payout delivery to an EOA was **not** verified on Studionet and why;
+(2) a failed Studio delivery **loses the value, because the position is
+settled first** and a retry is refused — this was the missing one, the
+README said the value was "deducted without being delivered" but never said
+the loss was final;
+(3) one key is one key;
+(4) what is live-verified versus only-tested.  Committed as `ad0d35e` and
+pushed to `master`.
+
+*Also fixed, not asked for:* the repo-local git identity was
+`attest build <build@attest.local>` — a name that is on this project's own
+rejected-names list.  Set back to `falsifiable build <build@falsifiable.local>`
+and the unpushed commit was re-authored (no published history was rewritten).
+
+
