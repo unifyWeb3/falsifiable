@@ -27,7 +27,7 @@ import chainconfig  # noqa: E402
 from studio import address_of, client_for, deploy, load_accounts, wait  # noqa: E402
 
 CONTRACT = Path(__file__).resolve().parent.parent / "contracts" / "falsifiable.py"
-FUND_AMOUNT = 1000
+FUND_AMOUNT = 1000 * 10**18  # the faucet takes wei
 
 
 def rpc(method: str, params: list) -> object:

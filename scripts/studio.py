@@ -112,6 +112,11 @@ def load_accounts() -> dict[str, LocalAccount]:
 
 def client_for(account: LocalAccount | None = None):
     config = load_config()
+    if account is None:
+        # The release-candidate SDK requires a signer even for view calls.  A
+        # fresh in-memory key is enough: reads are never signed and it holds
+        # nothing.  It is never printed and never persisted.
+        account = Account.create()
     client = create_client(
         chain=chain_for(config), endpoint=config["rpcUrl"], account=account
     )

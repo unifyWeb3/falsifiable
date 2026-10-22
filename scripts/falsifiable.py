@@ -78,8 +78,10 @@ def _say_where() -> str:
 
 def _market_dict(market_id: int, market) -> dict:
     digest = market[13]
-    if isinstance(digest, (bytes, bytearray)):
-        digest = digest.hex()
+    if isinstance(digest, memoryview):
+        digest = bytes(digest).hex()
+    elif isinstance(digest, (bytes, bytearray)):
+        digest = bytes(digest).hex()
     return {
         "id": market_id,
         "creator": market[1],
@@ -205,6 +207,24 @@ def cmd_confirm_delivery(args) -> int:
     return 0
 
 
+def cmd_ledger(args) -> int:
+    client = client_for()
+    address = _say_where()
+    staked, paid, escrowed, balance = client.read_contract(address, "get_ledger")
+    print(
+        json.dumps(
+            {
+                "total_staked": int(staked),
+                "total_paid": int(paid),
+                "total_escrowed": int(escrowed),
+                "contract_balance": int(balance),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def cmd_position(args) -> int:
     client = client_for()
     address = _say_where()
@@ -281,6 +301,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     confirm.add_argument("--market", type=int, required=True)
     confirm.set_defaults(func=cmd_confirm_delivery)
+
+    ledger = sub.add_parser("ledger", help="show the contract's money ledger")
+    ledger.set_defaults(func=cmd_ledger)
 
     position = sub.add_parser("position", help="show an account's position")
     position.add_argument("--market", type=int, required=True)
