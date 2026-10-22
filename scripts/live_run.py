@@ -20,12 +20,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from studio import client_for, load_accounts  # noqa: E402
+import chainconfig  # noqa: E402
+from studio import client_for, get, load_accounts, wait as wait_tx, write  # noqa: E402
 
 from genlayer_py.types import TransactionStatus  # noqa: E402
 
 GEN = 10**18
-CONTRACT = "0xdf426A429a9C9Ed25f2FF208aA81190dB3874822"
+CONTRACT = chainconfig.contract_address()
 PAGE = "https://example.com/"
 MISSING = "https://example.com/falsifiable-this-path-does-not-exist"
 CLOSE_IN = 300
@@ -43,7 +44,7 @@ def wait(client, tx_id: str, label: str) -> dict:
         tx_id, status=TransactionStatus.FINALIZED, retries=80, interval=3000
     )
     print(
-        f"    -> {receipt.get('status_name')}/{receipt.get('result_name')}", flush=True
+        f"    -> {get(receipt, 'result_name')}/{get(receipt, 'result_name')}", flush=True
     )
     error = contract_error(client, tx_id)
     if error:
@@ -102,7 +103,8 @@ def main() -> int:
     def stake_tx(who: str, market_id: int, side: int, amount_gen: float) -> str:
         """Submit a stake.  Submission is cheap; finalising is not."""
         account = accounts[who]
-        return client.write_contract(
+        return write(
+            client,
             CONTRACT,
             "stake",
             account=account,
@@ -114,16 +116,14 @@ def main() -> int:
         """Call the contract.  A refusal is recorded, not raised."""
         account = accounts[who]
         try:
-            tx = client.write_contract(CONTRACT, method, account=account, args=[market_id])
+            tx = write(client, CONTRACT, method, account, args=[market_id])
         except Exception as err:  # noqa: BLE001
             print(f"  {method} m{market_id} REFUSED: {str(err)[:200]}", flush=True)
             return (None, str(err)[:200])
         print(f"  {method} m{market_id} tx id: {tx}", flush=True)
-        receipt = client.wait_for_transaction_receipt(
-            tx, status=TransactionStatus.FINALIZED, retries=80, interval=3000
-        )
+        receipt = wait_tx(client, tx, method, retries=80)
         print(
-            f"    -> {receipt.get('status_name')}/{receipt.get('result_name')}",
+            f"    -> {get(receipt, 'result_name')}/{get(receipt, 'result_name')}",
             flush=True,
         )
         error = contract_error(client, tx)

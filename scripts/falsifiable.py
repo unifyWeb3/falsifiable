@@ -1,9 +1,13 @@
-"""Falsifiable — command line client for the Studio network.
+"""Falsifiable — command line client for the configured contract.
 
 The web app never holds a key, so every write is done here, with the key you
 provide.  The key is read from the environment (`FALSIFIABLE_KEY`, a hex
 private key) or from a file (`FALSIFIABLE_KEY_FILE`).  It is never printed,
 never logged and never written to disk by this program.
+
+The network and the contract address come from one file,
+`web/config/chain.json`, which the web board reads too.  No command here
+deploys a contract; deployment is `scripts/deploy.py` and nothing else.
 
     export FALSIFIABLE_KEY=0x...
     python3 scripts/falsifiable.py markets
@@ -14,6 +18,7 @@ never logged and never written to disk by this program.
     python3 scripts/falsifiable.py close --market 0
     python3 scripts/falsifiable.py resolve --market 0
     python3 scripts/falsifiable.py withdraw --market 0
+    python3 scripts/falsifiable.py confirm-delivery --market 0
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -29,9 +35,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from eth_account import Account  # noqa: E402
 from eth_account.signers.local import LocalAccount  # noqa: E402
 
-from studio import client_for  # noqa: E402
-
-from genlayer_py.types import TransactionStatus  # noqa: E402
+import chainconfig  # noqa: E402
+from studio import client_for, wait, write  # noqa: E402
 
 GEN = 10**18
 
@@ -64,26 +69,11 @@ def to_wei(amount: str) -> int:
     return int(float(amount) * GEN)
 
 
-def wait(client, tx_id: str, label: str) -> dict:
-    print(f"  {label} tx id: {tx_id}", flush=True)
-    receipt = client.wait_for_transaction_receipt(
-        tx_id, status=TransactionStatus.FINALIZED, retries=60, interval=3000
-    )
-    print(
-        f"  {label} -> {receipt.get('status_name')}/{receipt.get('result_name')}",
-        flush=True,
-    )
-    return receipt
-
-
-def cmd_markets(args) -> int:
-    client = client_for()
-    count = int(client.read_contract("get_market_count"))
-    print(f"markets: {count}")
-    for market_id in range(count):
-        market = client.read_contract("get_market", args=[market_id])
-        print(json.dumps(_market_dict(market_id, market), default=str))
-    return 0
+def _say_where() -> str:
+    """Print the one configured network/contract; return the address."""
+    address = chainconfig.contract_address()
+    print(f"# {chainconfig.describe()}", file=sys.stderr, flush=True)
+    return address
 
 
 def _market_dict(market_id: int, market) -> dict:
@@ -108,9 +98,21 @@ def _market_dict(market_id: int, market) -> dict:
     }
 
 
+def cmd_markets(args) -> int:
+    client = client_for()
+    address = _say_where()
+    count = int(client.read_contract(address, "get_market_count"))
+    print(f"markets: {count}")
+    for market_id in range(count):
+        market = client.read_contract(address, "get_market", args=[market_id])
+        print(json.dumps(_market_dict(market_id, market), default=str))
+    return 0
+
+
 def cmd_show(args) -> int:
     client = client_for()
-    market = client.read_contract("get_market", args=[args.market])
+    address = _say_where()
+    market = client.read_contract(address, "get_market", args=[args.market])
     print(json.dumps(_market_dict(args.market, market), indent=2, default=str))
     return 0
 
@@ -118,45 +120,48 @@ def cmd_show(args) -> int:
 def cmd_create(args) -> int:
     account = load_key()
     client = client_for(account)
+    address = _say_where()
     if args.rule not in RULES:
         raise SystemExit(f"unknown rule {args.rule}; pick one of {', '.join(RULES)}")
     kind = RULES[args.rule]
     if kind in (5, 6) and not args.path:
         raise SystemExit("this rule needs --path")
-    code = (Path(__file__).resolve().parent.parent / "contracts" / "falsifiable.py").read_text()
-    tx_id = client.deploy_contract(code, account=account)
-    wait(client, tx_id, "deploy")
-    receipt = client.get_transaction(tx_id)
-    address = receipt.get("recipient")
-    print(f"contract address: {address}")
-    create_tx = client.write_contract(
+    before = int(client.read_contract(address, "get_market_count"))
+    tx_id = write(
+        client,
         address,
         "create_market",
-        account=account,
+        account,
         args=[
             args.url,
             args.claim,
             kind,
             args.param,
             args.path or "",
-            int(args.close_in) + int(__import__("time").time()),
+            int(args.close_in) + int(time.time()),
         ],
     )
-    wait(client, create_tx, "create_market")
-    count = int(client.read_contract("get_market_count"))
-    print(f"market id: {count - 1}")
+    wait(client, tx_id, "create_market")
+    after = int(client.read_contract(address, "get_market_count"))
+    if after != before + 1:
+        raise SystemExit(
+            f"create_market did not create a market on {address} "
+            f"(count {before} -> {after})"
+        )
+    print(f"market id: {after - 1}")
     return 0
 
 
 def cmd_stake(args) -> int:
     account = load_key()
     client = client_for(account)
-    address = _contract_address(client)
+    address = _say_where()
     side = 0 if args.side.lower() in ("yes", "y", "0") else 1
-    tx_id = client.write_contract(
+    tx_id = write(
+        client,
         address,
         "stake",
-        account=account,
+        account,
         value=to_wei(args.amount),
         args=[args.market, side],
     )
@@ -167,8 +172,8 @@ def cmd_stake(args) -> int:
 def cmd_close(args) -> int:
     account = load_key()
     client = client_for(account)
-    address = _contract_address(client)
-    tx_id = client.write_contract(address, "close_market", account=account, args=[args.market])
+    address = _say_where()
+    tx_id = write(client, address, "close_market", account, args=[args.market])
     wait(client, tx_id, "close_market")
     return 0
 
@@ -176,8 +181,8 @@ def cmd_close(args) -> int:
 def cmd_resolve(args) -> int:
     account = load_key()
     client = client_for(account)
-    address = _contract_address(client)
-    tx_id = client.write_contract(address, "resolve", account=account, args=[args.market])
+    address = _say_where()
+    tx_id = write(client, address, "resolve", account, args=[args.market])
     wait(client, tx_id, "resolve")
     return 0
 
@@ -185,24 +190,33 @@ def cmd_resolve(args) -> int:
 def cmd_withdraw(args) -> int:
     account = load_key()
     client = client_for(account)
-    address = _contract_address(client)
-    tx_id = client.write_contract(address, "withdraw", account=account, args=[args.market])
+    address = _say_where()
+    tx_id = write(client, address, "withdraw", account, args=[args.market])
     wait(client, tx_id, "withdraw")
     return 0
 
 
-def _contract_address(client) -> str:
-    value = os.environ.get("FALSIFIABLE_CONTRACT")
-    if not value:
-        raise SystemExit("set FALSIFIABLE_CONTRACT to the deployed contract address")
-    return value
+def cmd_confirm_delivery(args) -> int:
+    account = load_key()
+    client = client_for(account)
+    address = _say_where()
+    tx_id = write(client, address, "confirm_delivery", account, args=[args.market])
+    wait(client, tx_id, "confirm_delivery")
+    return 0
 
 
 def cmd_position(args) -> int:
     client = client_for()
-    address = _contract_address(client)
-    position = client.read_contract("get_position", args=[args.market, args.address])
-    preview = client.read_contract("get_payout_preview", args=[args.market, args.address])
+    address = _say_where()
+    position = client.read_contract(
+        address, "get_position", args=[args.market, args.address]
+    )
+    preview = client.read_contract(
+        address, "get_payout_preview", args=[args.market, args.address]
+    )
+    pending = client.read_contract(
+        address, "get_pending", args=[args.market, args.address]
+    )
     print(
         json.dumps(
             {
@@ -211,6 +225,7 @@ def cmd_position(args) -> int:
                 "settled_yes": position[2],
                 "settled_no": position[3],
                 "payout_preview": preview,
+                "pending": pending,
             },
             indent=2,
             default=str,
@@ -229,7 +244,9 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("--market", type=int, required=True)
     show.set_defaults(func=cmd_show)
 
-    create = sub.add_parser("create", help="deploy the contract and open a market")
+    create = sub.add_parser(
+        "create", help="open a market on the configured contract"
+    )
     create.add_argument("--url", required=True)
     create.add_argument("--claim", required=True)
     create.add_argument("--rule", required=True, choices=sorted(RULES))
@@ -252,9 +269,18 @@ def build_parser() -> argparse.ArgumentParser:
     resolve.add_argument("--market", type=int, required=True)
     resolve.set_defaults(func=cmd_resolve)
 
-    withdraw = sub.add_parser("withdraw", help="withdraw your own position")
+    withdraw = sub.add_parser(
+        "withdraw", help="request your payout (does not settle it)"
+    )
     withdraw.add_argument("--market", type=int, required=True)
     withdraw.set_defaults(func=cmd_withdraw)
+
+    confirm = sub.add_parser(
+        "confirm-delivery",
+        help="acknowledge receipt; this is what settles the position",
+    )
+    confirm.add_argument("--market", type=int, required=True)
+    confirm.set_defaults(func=cmd_confirm_delivery)
 
     position = sub.add_parser("position", help="show an account's position")
     position.add_argument("--market", type=int, required=True)

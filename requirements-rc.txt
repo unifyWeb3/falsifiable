@@ -1,0 +1,14 @@
+# The declared target is Studio Devnet (chain 61997).  Its Consensus v0.6 fee
+# envelope is only understood by the release-candidate toolchain, so it lives
+# in its own environment; the repository's original .venv is left untouched.
+#
+#   python3 -m venv .venv-rc
+#   .venv-rc/bin/pip install -r requirements-rc.txt
+#   .venv-rc/bin/python -m pytest tests -q
+#   .venv-rc/bin/python scripts/falsifiable.py markets
+genlayer-py==0.19.0rc2
+genlayer-test==0.30.0rc2
+genvm-linter==0.11.1rc2
+eth-account>=0.13
+pytest>=8
+requests>=2.32
