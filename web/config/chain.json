@@ -1,0 +1,6 @@
+{
+  "network": "studio-dev",
+  "chainId": 61997,
+  "rpcUrl": "https://studio-dev.genlayer.com/api",
+  "contract": "0x0000000000000000000000000000000000000000"
+}

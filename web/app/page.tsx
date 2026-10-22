@@ -42,7 +42,7 @@ export default async function BoardPage() {
         <h1 className="serif text-2xl">The board is unreachable</h1>
         <p className="mt-2 max-w-[62ch] text-[0.95rem] text-ink-mid">
           {kind === "config"
-            ? "This deployment is not configured for a contract, so it will not pretend the chain is empty. Set NEXT_PUBLIC_STUDIONET_RPC and NEXT_PUBLIC_FALSIFIABLE_CONTRACT and reload."
+            ? "This deployment is not configured for a contract, so it will not pretend the chain is empty. Fix web/config/chain.json (the one file the board and the CLI both read) and reload."
             : "The Studio RPC did not answer. The board below is not a cached copy — there is no cached copy."}
         </p>
         <p className="codeblock mt-4">{message}</p>

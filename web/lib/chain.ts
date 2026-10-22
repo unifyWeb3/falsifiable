@@ -1,13 +1,18 @@
 /**
  * Read-only access to the deployed Falsifiable contract over the public
- * GenLayer Studio JSON-RPC endpoint.
+ * GenLayer JSON-RPC endpoint.
  *
- * Fail-closed: if the public configuration is missing, every call throws a
- * `ConfigError` instead of silently pretending the chain is empty.  There is
+ * The network and the contract address come from one file,
+ * `web/config/chain.json`, which the Python CLI reads too.  There is no other
+ * copy of either value anywhere in the repository.
+ *
+ * Fail-closed: if the configuration is missing or malformed, every call throws
+ * a `ConfigError` instead of silently pretending the chain is empty.  There is
  * no key material in this file or anywhere else in `web/` — the app can only
  * read.  Writes are copy-paste commands you run with your own key.
  */
 
+import chainConfig from "../config/chain.json";
 import { decodeCalldata, encodeCalldata, fromHex, toHex, type CalldataValue } from "./calldata";
 import { rlpEncodeList } from "./rlp";
 
@@ -26,25 +31,25 @@ export class RpcError extends Error {
 }
 
 export function rpcUrl(): string {
-  const value = process.env.NEXT_PUBLIC_STUDIONET_RPC;
-  if (!value) {
+  const value = chainConfig.rpcUrl;
+  if (!value || !value.startsWith("https://")) {
     throw new ConfigError(
-      "NEXT_PUBLIC_STUDIONET_RPC is not set. The app cannot read the chain.",
+      "web/config/chain.json: rpcUrl must be an https url. The app cannot read the chain.",
     );
   }
   return value;
 }
 
 export function contractAddress(): string {
-  const value = process.env.NEXT_PUBLIC_FALSIFIABLE_CONTRACT;
+  const value = chainConfig.contract;
   if (!value) {
     throw new ConfigError(
-      "NEXT_PUBLIC_FALSIFIABLE_CONTRACT is not set. The app cannot read the contract.",
+      "web/config/chain.json: contract is not set. The app cannot read the contract.",
     );
   }
   if (!/^0x[0-9a-fA-F]{40}$/.test(value)) {
     throw new ConfigError(
-      "NEXT_PUBLIC_FALSIFIABLE_CONTRACT is not a valid contract address.",
+      "web/config/chain.json: contract is not a valid contract address.",
     );
   }
   return value;
