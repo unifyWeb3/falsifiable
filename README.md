@@ -246,6 +246,19 @@ currently reads:
 }
 ```
 
+`studio-dev` is the canonical name. `studio-next` is the documented alias for
+the same preview deployment on chain 61997, and that was checked rather than
+assumed: both `https://studio-dev.genlayer.com/api` and
+`https://studio-next.genlayer.com/api` return chain id `0xf22d` (61997), the
+same deployed code at `0xA629…` (sha256 `a024fe…`, 26995 bytes), identical
+current balances for the contract and the payout account, and the same
+withdraw transaction `0x2d4128…` as `FINALIZED`/`MAJORITY_AGREE`. GenLayer's
+Studio docs say: “If `studio-next.genlayer.com` is enabled as a second browser
+entry point for the same preview deployment, it is an alias for people, not a
+second SDK network. Programmatic clients should keep using the canonical
+`https://studio-dev.genlayer.com/api` endpoint.” —
+<https://docs.genlayer.com/developers/intelligent-contracts/tools/genlayer-studio>.
+
 `create` calls `create_market` on that contract. It never deploys. Deploying
 is `scripts/deploy.py`, and nothing else.
 
@@ -274,6 +287,62 @@ GENVMROOT=/path/to/genvmroot .venv-rc/bin/genvm-lint check contracts/falsifiable
 > `GENVMROOT` at an extracted GenVM root (a directory with
 > `runners/genlayer-py-std/src`) and it runs offline. The report states which
 > of the two actually passed.
+
+### Lint status
+
+`genvm-lint lint` is **not green** on this source, and that is recorded here
+rather than hidden. On `genvm-linter==0.11.1rc2` the exact output is:
+
+```text
+✗ Lint failed
+  line 327: Non-deterministic call 'time.time()'
+  line 195: gl.nondet.* call in '_fetch_and_evaluate' not reachable from equivalence principle block
+  line 264: Class 'Market' used in storage needs @allow_storage decorator
+```
+
+Exit code `1`. JSON mode names the three rules `W002` (`time.time`), `E010`
+(the non-deterministic call is not seen as reachable from an equivalence
+block) and `E014` (the storage class does not have the decorator the linter
+knows).
+
+All three are linter-version mismatches, not contract defects. Line
+references below are to the installed `genvm_linter` 0.11.1rc2 package and
+the v0.3.0 SDK stdlib.
+
+- **W002 / `time.time()`.** The call is on the deterministic path only:
+  `_now()` (line 320) calls it at line 327, from `create_market`, `stake`,
+  `close_market`, `resolve` and `get_now`; it is not reachable from the
+  `leader`/`validator` closures passed to `run_nondet_default`. GenLayer's
+  docs say: “The Python standard library's clock is wired to the transaction
+  datetime — `datetime.now()`, `datetime.now(tz)`, and `time.time()` all
+  return the same value across validators.” (The same page lists
+  `int(time.time())` as a supported form.) —
+  <https://docs.genlayer.com/developers/intelligent-contracts/features/transaction-context>.
+  The linter still lists `time.time` in `FORBIDDEN_CALLS`
+  (`genvm_linter/lint/safety.py:39–44`).
+- **E010 / `run_nondet_default`.** The call at line 536 is reached from
+  `leader`/`validator` → `_fetch_and_evaluate` → `gl.nondet.web.get` (line
+  195). The v0.3.0 SDK stdlib exports `run_nondet_default`
+  (`genlayer/vm/__init__.py:15–16`, definition at 446). The linter's
+  `SAFE_PATTERNS` (`genvm_linter/lint/safety.py:361–370`) lists
+  `gl.vm.run_nondet`, `gl.vm.run_nondet_unsafe` and the eq-principle forms,
+  but not `run_nondet_default`.
+- **E014 / `@gl.storage.allow`.** The linter accepts only `allow_storage` or
+  `gl.allow_storage` (`genvm_linter/lint/structure.py:282`). The v0.3.0 SDK
+  stdlib exports `allow` from `genlayer.storage`
+  (`genlayer/storage/__init__.py:18`, definition in
+  `storage/_internal/generate.py:41`) and has no `allow_storage` symbol.
+
+GenVM's own validation passes on the same source: **16 methods** (10 view,
+6 write). Live `resolve` transactions on chain 61997 returned
+`MAJORITY_AGREE`.
+
+A green lint was **not** achieved. Changing the `run_nondet_default` call or
+the `@gl.storage.allow` decorator to the names the linter expects would
+change the source, hence the deployed bytes, and would require a redeploy;
+that was not done.
+The deployed source is byte-identical to this repository's file (sha256
+`a024fe206d11ae0a883c08348b02b664eb1e0b1032c5387413944e31a9cd2eda`).
 
 ### The tests
 
@@ -321,6 +390,9 @@ The web app builds the same commands for you, and the front end only ever
 offers an action the contract will accept: that list comes from one pure
 function, `deriveActions` in [`web/lib/market-state.ts`](web/lib/market-state.ts),
 and a test parses `contracts/falsifiable.py` and asserts the two agree.
+
+The live page was checked with `curl` and the JSON API only, not a browser:
+Chromium is not installed in this environment.
 
 ### Deploying
 
