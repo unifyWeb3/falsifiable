@@ -310,11 +310,12 @@ UNVERIFIED until it was confirmed from official GenLayer sources.
 | deployed code vs pushed code | `git diff --name-only 86a1360 HEAD -- web/` is **empty**: the only commit after the deployment touched `state/MEMORY.md`, so the served `web/` code is byte-identical to the pushed `web/` code |
 | the fix is really live | `GET /api/position?id=5&address=0x191489…` returns a real position (`yes=10 GEN`).  `get_position` is a 70-byte calldata, which is exactly the case that the pre-`86a1360` RLP short-form header broke.  The live endpoint therefore runs the **fixed** codec. |
 
-**Grep for a studied project's name / author / URL — empty.**  `reviewguard`,
-`phu1271997`, `review-guard`, `review_guard` return **no match** in the
-working tree (tracked + untracked), in `git log -p --all`, and in a scan of
-**every blob in every object reachable from every ref plus the reflog**
-(98 objects).  The only non-npm GitHub URLs in tracked files are
+**Grep for the studied project's name / author / URL — empty in the working
+tree.**  The four candidate spellings return **no match** in the working tree
+(tracked + untracked) after this edit.  One earlier decision-log entry (commit
+`c1a92ee`, already published) quoted the candidate strings themselves; that is
+left in history rather than rewritten, and the strings are not repeated here.
+The only non-npm GitHub URLs in tracked files are
 `github.com/unifyWeb3/falsifiable` (ours) and `github.com/genlayerlabs/genvm`
 (official GenLayer).  `state/SHOWCASE-COPY.md` was untracked; it is ours and
 contains no external project name.
@@ -345,3 +346,78 @@ rejected-names list.  Set back to `falsifiable build <build@falsifiable.local>`
 and the unpushed commit was re-authored (no published history was rewritten).
 
 
+
+---
+
+## Stage 2 / reviewer follow-up — the declared target and the payout fix
+
+**The reviewer was right about the central defect.**  The shipped contract
+settled the position and incremented `total_paid` *before* it emitted the
+transfer.  On the target network the internal-message route to an EOA is a
+silent no-op, so the ledger could claim "paid" for money that never arrived.
+Documenting that was not enough; it is fixed.
+
+**What the network actually is.**  The announcement was chain **61997**
+"Studio dev preview".  `https://studio-next.genlayer.com/api` and
+`https://studio-dev.genlayer.com/api` are the same deployment (identical
+genesis, lockstep blocks); the canonical name is `studio-dev`, and the config
+uses it.  The old README named 61999, which was the previous deployment.
+
+**Toolchain.**  The target speaks the Consensus v0.6 fee envelope.  It needs
+`genlayer-py==0.19.0rc2` / `genlayer-test==0.30.0rc2`; the original `.venv`
+(SDK 0.16.3) cannot even load the new contract ("unexpected end of memory"),
+and the RC venv cannot load the old one.  The RC toolchain therefore lives in
+`requirements-rc.txt` and a separate `.venv-rc`; the pinned `.venv` was not
+upgraded.  Fees had to be supplied explicitly: without the live policy the
+deploy fails `FeesDistributionMissing`, and a non-zero `totalMessageFees`
+without an allocation tree fails `Mode1MessageFeesRequireGenVMPerEmissionSupport`.
+The working preset is `{leaderTimeunitsAllocation: 100,
+validatorTimeunitsAllocation: 200, totalMessageFees: 0, rotations: [1]}`.
+
+**Three-direction probe on 61997** (contract `0xd963…0004`):
+
+| direction | result |
+|---|---|
+| EOA -> contract, 5 GEN | delivered, contract balance +5 |
+| contract -> contract | delivered, child tx `value_credited=true` |
+| contract -> EOA via internal message (`get_at`) | main tx `FINISHED_WITH_RETURN`, **no child tx**, EOA unchanged, contract unchanged, state advanced — silent no-op |
+| contract -> EOA via EVM external message | EOA **+3 GEN**, contract **-3 GEN** |
+| EVM send larger than the balance | `FINISHED_WITH_ERROR`, state rolled back, EOA unchanged |
+
+**Chosen mechanism.**  `@gl.evm.contract_interface` + `emit_transfer` for
+transport, and two-phase settlement: `withdraw` records a pending claim and
+emits, `confirm_delivery` (payee only) settles and books.  A second claim while
+pending is refused; a replay of the confirmation is refused; `total_paid` is
+bounded by `total_staked`.  If delivery silently fails, the claim stays pending
+and is never counted as paid — the contract will not re-emit, because a re-send
+could pay twice.  That limit is stated in the README.  Design:
+`state/DESIGN-payout.md`.
+
+**Stage A.**  `state/REVIEW-FIX.md`: exact `withdraw()` lines 555–562 of the
+old contract, the declared-vs-probed network table, every CLI read/write and
+its address/network source, and every hard-coded/stale address.
+
+**Red then green.**  On the old contract under the old `.venv`,
+`tests/test_payout.py` fails with `settled_yes moved before delivery was
+confirmed` / `assert 10000000000000000000 == 0` (7 failed, 2 passed).  On the
+ported contract under `.venv-rc`: **96 passed, 0 failed, 0 skipped**.
+
+**Deployment.**  `scripts/deploy.py --write-config` deployed once to
+`0xA62952F70354355d2915ee2aC66B91effcF3a6cB` (tx `0x4fcd703f…`), and
+`gen_getContractCode` read back byte-for-byte identical to
+`contracts/falsifiable.py` (sha256 `a024fe20…`, 26995 bytes).  The single
+config `web/config/chain.json` now points at it.
+
+**Live lifecycle, CLI only.**  Market 2: create, stake YES 10, stake NO 4,
+close, resolve YES, withdraw, confirm-delivery.  At pinned block `1792703185`
+the payee EOA was **+13.999873695 GEN** (14 GEN minus the 0.000126305 GEN tx
+fee) and the contract was **−14 GEN**; after the withdraw the position read
+`settled_yes = 0`, `pending = 14 GEN`, `total_paid` unchanged.  A second
+withdraw and a loser's withdraw both ended `FINISHED_WITH_ERROR`.  All ids in
+`state/LIVE-RESULTS-61997.md`.
+
+**Two bugs found while running it live, both fixed.**  `deploy.py` funded
+accounts with `1000` wei instead of `1000 GEN`; and the RC SDK requires a
+signer even for view calls, so read-only commands now use a fresh in-memory
+key that is never printed or persisted.  A 90-second market window was also
+too short for finality; the run uses 300 seconds.

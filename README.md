@@ -15,7 +15,11 @@ payouts, and no owner.
 
 - **Contract:** [`contracts/falsifiable.py`](contracts/falsifiable.py)
 - **Design:** [`state/DESIGN.md`](state/DESIGN.md)
-- **Live results (transaction ids):** [`state/LIVE-RESULTS.md`](state/LIVE-RESULTS.md)
+- **Live results on the declared target (transaction ids):**
+  [`state/LIVE-RESULTS-61997.md`](state/LIVE-RESULTS-61997.md)
+- **Live results on the previous deployment:**
+  [`state/LIVE-RESULTS.md`](state/LIVE-RESULTS.md)
+- **Network and contract (one file):** [`web/config/chain.json`](web/config/chain.json)
 - **Web app:** [`web/`](web/)
 
 ---
@@ -24,23 +28,24 @@ payouts, and no owner.
 
 Four things, in plain words.
 
-**1. Paying out to your own account was NOT verified on Studio.** On the
-GenLayer Studio network a contract **cannot deliver native GEN to an
-externally-owned account**. The contract computes the payout correctly and
-writes it into its own ledger, but the Studio node has no host layer, so the
-delivery transaction ends `NO_MAJORITY` with *"Contract … not found"* and the
-value is deducted without arriving. This is a **network** limitation, not a
-bug in the contract, and this repository does not claim the payout works.
-[Details and the transaction ids](#what-was-actually-verified).
+**1. Paying out to your own account works on the declared target, and the
+proof is live.** On Studio Devnet (chain 61997) a contract cannot reach an
+externally-owned account with an internal message: the call returns
+successfully and nothing arrives. The contract therefore sends payouts as an
+EVM external message, and that route did deliver. A payee's balance rose by
+14 GEN at pinned block `1792703185`, while the contract's balance fell by
+exactly 14 GEN. [The transaction ids and the balances](#what-was-actually-verified).
 
-**2. On Studio a failed delivery loses the value, and you cannot try again.**
-`withdraw` settles your position **first** and emits the transfer **second** —
-on purpose, so that a second call, or a re-entrant one, finds nothing to pay.
-That ordering is what stops double payment. It is also why a Studio payout
-failure is final: your position is already marked settled and the value has
-already left the contract, so a retry is refused with *"nothing to withdraw"*.
-Value **into** a contract and value **between** contracts both work on Studio;
-only the last hop, to a plain account, does not.
+**2. A payout is not "settled" until the payee says it arrived.** `withdraw`
+records a pending claim and emits the value; it does **not** touch the
+settled counters and does **not** add to `total_paid`. `confirm_delivery`,
+callable only by the payee, is the only path that settles the position and
+books the amount as paid. While a payout is pending a second `withdraw` is
+refused. If the value never arrives, the claim stays pending and is never
+counted as paid: the contract will not re-emit it, because a second emission
+could pay twice. That is the limit — an undelivered payout becomes stuck
+rather than being retried. It is never marked settled without the payee's
+confirmation.
 
 **3. One key is one key.** The deployer key in this repository is a throwaway
 Studio testnet key. It is gitignored, it is never printed, and the contract
@@ -174,42 +179,44 @@ whether a stake was in time.
 
 ## What was actually verified
 
-**Live, on the GenLayer Studio network** (transaction ids in
-[`state/LIVE-RESULTS.md`](state/LIVE-RESULTS.md)):
+**Live, on Studio Devnet (chain 61997), the declared target** — every
+transaction id and balance in
+[`state/LIVE-RESULTS-61997.md`](state/LIVE-RESULTS-61997.md):
 
-- the contract deployed, and the deployed source is **byte-for-byte** the file
-  in this repository (sha256 `a3291155911ecfd93d817ecb153aea266818f94a930760c32f9952b06bc94e8b`,
-  23262 bytes);
-- a market staked on both sides, closed, and resolved **YES** — with the
-  validators independently fetching the page and agreeing on its digest;
-- a market resolved **NO**;
+- the contract is deployed at `0xA62952F70354355d2915ee2aC66B91effcF3a6cB`,
+  and `gen_getContractCode` on that address is **byte-for-byte** the file in
+  this repository (sha256 `a024fe206d11ae0a883c08348b02b664eb1e0b1032c5387413944e31a9cd2eda`,
+  26995 bytes; deploy tx `0x4fcd703f…`);
+- a market was created, staked on both sides, closed, and resolved **YES**;
+  the validators fetched the page and agreed on its digest;
+- the payout **arrived in an externally-owned account**: the payee's balance
+  rose by 14 GEN at pinned block `1792703185`, and the contract's balance fell
+  by exactly 14 GEN;
+- the withdraw left the position **unsettled** (`settled_yes = 0`,
+  `pending = 14 GEN`, `total_paid` unchanged) until `confirm_delivery` ran;
+- a **second withdraw was refused**, a **loser was refused**;
+- a **one-sided** market refunded through the same two-phase path;
+- `total_paid + total_escrowed <= total_staked` held at every step, and
+  `total_paid = total_staked = 24 GEN` after the last confirmation.
+
+**Live, on the previous Studionet deployment (chain 61999)** — transaction ids
+in [`state/LIVE-RESULTS.md`](state/LIVE-RESULTS.md). That deployment is kept
+for history and is **not** the declared target:
+
+- a market staked on both sides, closed, and resolved **YES**, and one resolved
+  **NO**;
 - a market resolved **UNDETERMINED** on a 404 and refunded both sides;
 - a **one-sided** market that refunded;
-- a **second withdraw refused** by the contract, and a withdraw by somebody
-  with no position refused;
-- a **loser** refused.
+- a **second withdraw refused**, and a withdraw by somebody with no position
+  refused.
 
-**One thing did not work on Studio, and it is stated rather than hidden:**
-a contract **cannot pay native GEN to an externally-owned account** on the
-Studio network. The transfer is posted correctly and the contract's internal
-accounting is right, but the Studio node has no host layer, so the delivery
-transaction ends `NO_MAJORITY` with *"Contract … not found"*, and the value
-is deducted without being delivered. Value **into** a contract and value
-**between** contracts both work on Studio. The same `emit_transfer` call is
-expected to route a plain transfer on a network with a full host layer
-(Bradbury, mainnet), but that has not been tested here, so this repository
-does not claim it.
-
-**The loss is final on Studio, because the position is settled first.**
-`withdraw` marks the position settled and adds the amount to `total_paid`
-*before* it emits the transfer, so that a second call — or a re-entrant one —
-finds nothing to pay. When the Studio delivery then fails, the value has
-already left the contract and the position is already settled, so **there is
-nothing left to retry for**: a second `withdraw` is refused with *"nothing to
-withdraw"*. The contract cannot know the delivery failed, because the failure
-happens outside the contract, after it has already committed. That ordering is
-what prevents double payment; on a network without a host layer it is also
-why a failed payout is a loss rather than a delay.
+**The old defect, stated plainly.** The contract that produced those Studionet
+results settled the position and added to `total_paid` *before* it emitted the
+transfer. On that network the internal-message delivery to a plain account
+silently did nothing, so the ledger said "paid" for money that never arrived.
+That ordering is gone: the fix is the two-phase path above, and the red test
+in `tests/test_payout.py` fails on the old contract with
+`settled_yes moved before delivery was confirmed`.
 
 **Only by the test suite** (not on a live network):
 
@@ -223,56 +230,76 @@ why a failed payout is a loss rather than a delay.
 
 ## Running it
 
-### The contract
+### One config, one contract
 
-The contract is plain Python in the GenLayer Intelligent Contract style. The
-header comment is load-bearing: it pins the runner the node must use.
+`web/config/chain.json` is the only place the network and the contract address
+live. The board imports it, every CLI command reads it, and a missing or
+malformed file stops the command instead of falling back to a default. It
+currently reads:
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install genlayer-test genlayer-py
+```json
+{
+  "network": "studio-dev",
+  "chainId": 61997,
+  "rpcUrl": "https://studio-dev.genlayer.com/api",
+  "contract": "0xA62952F70354355d2915ee2aC66B91effcF3a6cB"
+}
 ```
 
-`genvm-lint` checks it:
+`create` calls `create_market` on that contract. It never deploys. Deploying
+is `scripts/deploy.py`, and nothing else.
+
+### The toolchain
+
+The declared target uses the Consensus v0.6 fee envelope, which only the
+release-candidate SDK understands. It lives in its own environment; the
+repository's original `.venv` is left untouched.
 
 ```bash
-.venv/bin/genvm-lint lint contracts/falsifiable.py
-GENVMROOT=/path/to/genvmroot .venv/bin/genvm-lint check contracts/falsifiable.py
+python3 -m venv .venv-rc
+.venv-rc/bin/pip install -r requirements-rc.txt
 ```
 
-> The `check` command resolves "latest" from the GenVM releases, and the
-> newest release renamed the bundle from `genvm-universal.tar.xz` to
-> `genvm-runners-all.tar.xz`, so the download 404s. Point `GENVMROOT` at a
-> GenVM root (a directory with `runners/genlayer-py-std/src`) and it passes.
+The contract header (`py-genlayer:latest`) is load-bearing: it selects the
+runner the node must use.
+
+`genvm-lint` checks the source:
+
+```bash
+.venv-rc/bin/genvm-lint lint contracts/falsifiable.py
+GENVMROOT=/path/to/genvmroot .venv-rc/bin/genvm-lint check contracts/falsifiable.py
+```
+
+> `check` downloads a GenVM release. If that download cannot finish, point
+> `GENVMROOT` at an extracted GenVM root (a directory with
+> `runners/genlayer-py-std/src`) and it runs offline. The report states which
+> of the two actually passed.
 
 ### The tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q
+.venv-rc/bin/python -m pytest tests/ -q
 ```
 
 The suite runs the contract in a real GenVM: the full path for YES, NO and
-UNDETERMINED, the money invariants, and twenty red-team cases. Every refusal
-is paired with a positive control, because a refusal that is not paired with
-a control can pass for the wrong reason — that rule caught two real bugs
-during development (the calldata codec decodes a tuple into a *list*, and the
-SDK's lazy API is eager).
+UNDETERMINED, the money invariants, the payout-delivery cases, and the
+red-team cases. Every refusal is paired with a positive control, because a
+refusal that is not paired with a control can pass for the wrong reason.
 
 ### The web app
 
 ```bash
 cd web
-cp .env.example .env.local      # then set the contract address
 npm install
 npm run dev
 ```
 
 It reads the chain over the public RPC and **cannot write**: there is no key
-anywhere in `web/`, and the configuration is public (`NEXT_PUBLIC_` only).
-Every write is a command you run yourself with your own key:
+anywhere in `web/`. Every write is a command you run yourself with your own
+key. Each command prints the network and contract it used to stderr.
 
 ```bash
 export FALSIFIABLE_KEY=0x...
-export FALSIFIABLE_CONTRACT=0xdf426A429a9C9Ed25f2FF208aA81190dB3874822
 
 python3 scripts/falsifiable.py markets
 python3 scripts/falsifiable.py create --url https://example.com/ \
@@ -281,21 +308,31 @@ python3 scripts/falsifiable.py stake --market 0 --side yes --amount 10
 python3 scripts/falsifiable.py close --market 0
 python3 scripts/falsifiable.py resolve --market 0
 python3 scripts/falsifiable.py withdraw --market 0
+python3 scripts/falsifiable.py confirm-delivery --market 0
+python3 scripts/falsifiable.py position --market 0 --address 0x...
+python3 scripts/falsifiable.py ledger
 ```
+
+`withdraw` requests the payout. `confirm-delivery` is what settles the
+position and books it as paid; run it from the same account that withdrew,
+after the value lands.
 
 The web app builds the same commands for you, and the front end only ever
 offers an action the contract will accept: that list comes from one pure
 function, `deriveActions` in [`web/lib/market-state.ts`](web/lib/market-state.ts),
 and a test parses `contracts/falsifiable.py` and asserts the two agree.
 
-### Deploying to a network of your own
+### Deploying
 
 ```bash
-python3 scripts/deploy.py     # deploys and proves the source matches
+python3 scripts/deploy.py                  # deploy, prove the source, print
+python3 scripts/deploy.py --write-config   # ... and make it the configured contract
 ```
 
-`scripts/keys.py` writes throwaway keys to a gitignored, mode-600 file and
-prints only addresses.
+`scripts/deploy.py` is the only deployment path. It prints the address and
+proves that `gen_getContractCode` is byte-for-byte the repository file. Only
+`--write-config` updates `web/config/chain.json`. `scripts/keys.py` writes
+throwaway keys to a gitignored, mode-600 file and prints only addresses.
 
 ---
 
@@ -304,11 +341,13 @@ prints only addresses.
 ```
 contracts/falsifiable.py   the contract
 state/DESIGN.md            lifecycle, rule set, equivalence, money model, red team
-state/LIVE-RESULTS.md      every live transaction id, and what was observed
+state/LIVE-RESULTS-61997.md  the current deployment: ids, balances, ledger
+state/LIVE-RESULTS.md      the previous deployment, kept for history
 state/MEMORY.md            decision log, and the SDK traps that cost time
-tests/                     64 tests against a real GenVM
+tests/                     96 tests against a real GenVM
 web/                       the read-only front end
 web/lib/market-state.ts    the one pure function the UI derives actions from
+web/config/chain.json      the one place the network and contract live
 scripts/                   keys, deploy, live runs, the CLI
 ```
 
