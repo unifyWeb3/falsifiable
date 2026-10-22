@@ -62,6 +62,7 @@ def test_winner_takes_the_whole_pot(direct_vm, deploy, clock):
 
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     # 10 GEN on YES wins the whole 14 GEN pot.
     assert int(contract.get_payout_preview(market_id, alice.as_hex)) == 0
     assert int(contract.get_totals()[1]) == 14 * GEN
@@ -105,6 +106,7 @@ def test_pro_rata_split_is_exact_with_no_dust(direct_vm, deploy, clock):
         who = account(name)
         with vm.prank(who):
             contract.withdraw(market_id)
+            contract.confirm_delivery(market_id)
         paid += int(contract.get_totals()[1]) - paid  # running total
     total_paid = int(contract.get_totals()[1])
     assert total_paid == pot, f"shares must sum to the pot exactly ({total_paid} != {pot})"
@@ -131,6 +133,7 @@ def test_shares_are_within_one_wei_of_pro_rata(direct_vm, deploy, clock):
         before = int(contract.get_totals()[1])
         with vm.prank(who):
             contract.withdraw(market_id)
+            contract.confirm_delivery(market_id)
         got = int(contract.get_totals()[1]) - before
         ideal = amount * pot // winner_pot
         assert abs(got - ideal) <= 1, (name, got, ideal)
@@ -155,6 +158,7 @@ def test_refund_makes_everybody_exactly_whole(direct_vm, deploy, clock):
         before = int(contract.get_totals()[1])
         with vm.prank(who):
             contract.withdraw(market_id)
+            contract.confirm_delivery(market_id)
         got = int(contract.get_totals()[1]) - before
         assert got == amount, (name, got, amount)
 
@@ -177,6 +181,7 @@ def test_single_sided_pool_refunds_the_staker(direct_vm, deploy, clock):
     before = int(contract.get_totals()[1])
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     assert int(contract.get_totals()[1]) - before == 9 * GEN + 5
 
 
@@ -193,6 +198,7 @@ def test_double_withdraw_is_refused(direct_vm, deploy, clock):
 
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     paid_once = int(contract.get_totals()[1])
     assert paid_once == 14 * GEN
 
@@ -220,6 +226,7 @@ def test_reentrant_withdraw_cannot_double_claim(direct_vm, deploy, clock):
 
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     # The position is fully settled, not merely marked as claimed.
     position = contract.get_position(market_id, alice.as_hex)
     assert int(position[2]) == int(position[0])
@@ -256,6 +263,7 @@ def test_total_paid_never_exceeds_total_staked(direct_vm, deploy, clock):
         with vm.prank(who):
             try:
                 contract.withdraw(market_id)
+                contract.confirm_delivery(market_id)
             except Exception:
                 pass
         staked, paid = contract.get_totals()
@@ -287,6 +295,7 @@ def test_many_tiny_stakes_are_all_paid_exactly(direct_vm, deploy, clock):
         who = account(f"t{index}")
         with vm.prank(who):
             contract.withdraw(market_id)
+            contract.confirm_delivery(market_id)
     # The winners' shares plus the losers' forfeited money make exactly the pot.
     staked, paid = contract.get_totals()
     winners_pot = sum(a for i, a in enumerate(amounts) if i % 2 == 0)
@@ -322,6 +331,7 @@ def test_a_staker_may_hold_both_sides(direct_vm, deploy, clock):
     before = int(contract.get_totals()[1])
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     got = int(contract.get_totals()[1]) - before
     # Alice is the only staker on the winning side, so she takes the whole
     # 20 GEN pot — including the 4 GEN she herself put on the losing side.

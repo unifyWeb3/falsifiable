@@ -1,4 +1,4 @@
-# { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
+# { "Depends": "py-genlayer:latest" }
 """Falsifiable — a stake market on checkable claims about a public web page.
 
 A market is one https URL + one precisely-worded claim + one machine-checkable
@@ -6,7 +6,13 @@ rule + a fixed close time.  People stake native GEN on YES or NO.  When the
 window closes, validators independently fetch the page and decide YES, NO or
 UNDETERMINED under the market's own written rule.  The whole pot is split pro
 rata among the winning side; UNDETERMINED refunds everybody; a single-sided
-pool refunds everybody.  Winnings are pulled through `withdraw`, never pushed.
+pool refunds everybody.  Value is pulled through `withdraw`, never pushed.
+
+Payouts are two-phase.  `withdraw` records a pending claim and emits the value
+over the chain's EVM external-message path (the only path that reaches an
+externally-owned account on this target).  `confirm_delivery`, callable only by
+the payee, is what marks the position settled and books the payment.  A message
+being emitted is never treated as a payment being delivered.
 
 Not escrow.  Not arbitration.  Not a court.  No appeals, no fees, no admin
 payouts, and no owner.
@@ -16,9 +22,9 @@ import hashlib
 import json
 import time
 
-import genlayer.gl as gl
-from genlayer.py.types import Address, u8, u64, u256
-from genlayer.py.storage import DynArray, TreeMap, allow_storage
+import genlayer as gl
+from genlayer.storage import DynArray, TreeMap
+from genlayer.types import Address, u8, u64, u256
 
 # --------------------------------------------------------------------------
 # States
@@ -80,6 +86,26 @@ MAX_PARAM_LEN = 1024
 MAX_PATH_LEN = 128
 
 EMPTY_DIGEST = b"\x00" * 32
+
+
+# --------------------------------------------------------------------------
+# The payout transport.
+#
+# An externally-owned account lives on the chain layer, so a value transfer to
+# it is an *external* message.  The `gl.contract.get_at(addr).emit_transfer`
+# route emits an *internal* message: on this target it is a silent no-op for an
+# address with no contract code, while still returning as if it had worked.
+# The EVM interface emits the external message that the chain layer executes.
+# --------------------------------------------------------------------------
+
+
+@gl.evm.contract_interface
+class _Recipient:
+    class View:
+        pass
+
+    class Write:
+        pass
 
 
 # --------------------------------------------------------------------------
@@ -182,7 +208,7 @@ def _fetch_and_evaluate(url: str, kind: int, param: str, path: str):
 def _same_result(mine, theirs) -> bool:
     """Compare two encoded results field by field.
 
-    `genlayer.py.calldata` decodes a tuple into a *list*, so comparing the
+    `genlayer.calldata` decodes a tuple into a *list*, so comparing the
     decoded value to a tuple with `==` is always False.  Compare fields.
     """
     if mine is None or theirs is None:
@@ -206,27 +232,35 @@ def _same_result(mine, theirs) -> bool:
 # --------------------------------------------------------------------------
 
 
-@allow_storage
+@gl.storage.allow
 class Position:
-    """One account's stake in one market."""
+    """One account's stake in one market.
+
+    `settled_yes` / `settled_no` are the parts of the stake that have been
+    acknowledged as paid.  `pending` is an amount that has been emitted but not
+    yet acknowledged; while it is non-zero the position cannot be withdrawn
+    again and it is not counted as paid.
+    """
 
     yes: u256
     no: u256
     settled_yes: u256
     settled_no: u256
+    pending: u256
 
     def __init__(self) -> None:
         self.yes = u256(0)
         self.no = u256(0)
         self.settled_yes = u256(0)
         self.settled_no = u256(0)
+        self.pending = u256(0)
 
 
 def _new_position() -> Position:
     return Position()
 
 
-@allow_storage
+@gl.storage.allow
 class Market:
     """One market: a claim, the rule that decides it, and the pot."""
 
@@ -263,7 +297,6 @@ class Market:
         self.settled_yes_stake = u256(0)
         self.settled_no_stake = u256(0)
         self.evidence_digest = EMPTY_DIGEST
-        self.positions = TreeMap()
 
 
 # --------------------------------------------------------------------------
@@ -271,12 +304,13 @@ class Market:
 # --------------------------------------------------------------------------
 
 
-class Falsifiable(gl.Contract):
+class Falsifiable(gl.contract.Contract):
     """Stake market on checkable claims about a public web page."""
 
     markets: DynArray[Market]
     total_staked: u256
     total_paid: u256
+    total_escrowed: u256
 
     def __init__(self) -> None:
         pass
@@ -286,9 +320,9 @@ class Falsifiable(gl.Contract):
     def _now(self) -> int:
         """The transaction timestamp.
 
-        GenLayer v0.2.16 pins the contract clock to the transaction timestamp,
-        so this is identical for the leader and for every validator.  It is
-        used only as a gate, never as evidence.
+        GenLayer pins the contract clock to the transaction timestamp, so this
+        is identical for the leader and for every validator.  It is used only
+        as a gate, never as evidence.
         """
         return int(time.time())
 
@@ -383,7 +417,6 @@ class Falsifiable(gl.Contract):
         market.settled_yes_stake = u256(0)
         market.settled_no_stake = u256(0)
         market.evidence_digest = EMPTY_DIGEST
-        market.positions = TreeMap()
 
         self.markets.append(market)
         return u64(len(self.markets) - 1)
@@ -411,9 +444,6 @@ class Falsifiable(gl.Contract):
         key = gl.message.sender_address
         position = market.positions.get(key)
         if position is None:
-            # NOTE: TreeMap.compute_if_absent is broken in this SDK version
-            # (it never invokes the "exists" callback when inserting), so the
-            # insert is done explicitly and the value read back.
             market.positions[key] = _new_position()
             position = market.positions[key]
         if int(side) == SIDE_YES:
@@ -499,9 +529,11 @@ class Falsifiable(gl.Contract):
         def validator(leader_result):
             if not isinstance(leader_result, gl.vm.Return):
                 return False
-            return _same_result(_fetch_and_evaluate(url, kind, param, path), leader_result.calldata)
+            return _same_result(
+                _fetch_and_evaluate(url, kind, param, path), leader_result.calldata
+            )
 
-        result = gl.vm.run_nondet_unsafe(leader, validator)
+        result = gl.vm.run_nondet_default(leader, validator)
         return int(result[0]), bytes(result[1])
 
     def _settle(
@@ -519,7 +551,12 @@ class Falsifiable(gl.Contract):
 
     @gl.public.write
     def withdraw(self, market_id: u64) -> None:
-        """Pull your winnings (or your refund).  Pays the caller, always."""
+        """Request your winnings (or your refund).
+
+        The value is emitted here, but nothing is settled and nothing is booked
+        as paid: that only happens in `confirm_delivery`, once the payee says
+        the value arrived.
+        """
         market = self._market(int(market_id))
         status = int(market.status)
         if status not in (
@@ -532,6 +569,8 @@ class Falsifiable(gl.Contract):
         position = market.positions.get(gl.message.sender_address)
         if position is None:
             raise gl.vm.UserError("nothing to withdraw")
+        if int(position.pending) > 0:
+            raise gl.vm.UserError("payout pending: confirm delivery first")
         remaining_yes = int(position.yes) - int(position.settled_yes)
         remaining_no = int(position.no) - int(position.settled_no)
         if remaining_yes == 0 and remaining_no == 0:
@@ -550,16 +589,52 @@ class Falsifiable(gl.Contract):
             # entitlement is never zero.
             raise gl.vm.UserError("nothing to withdraw")
 
-        # Checks before effects: settle the position *before* emitting the
-        # transfer, so a second call (or a re-entrant one) finds nothing.
+        # Record the claim *before* emitting, so a re-entrant call finds it.
+        # Nothing here marks the position settled or the money paid.
+        position.pending = u256(amount)
+        self.total_escrowed = u256(int(self.total_escrowed) + amount)
+        _Recipient(Address(gl.message.sender_address)).emit_transfer(
+            value=u256(amount)
+        )
+
+    @gl.public.write
+    def confirm_delivery(self, market_id: u64) -> None:
+        """Settle the caller's pending payout.  Only the payee can do this.
+
+        This is the only place where a position becomes settled and where an
+        amount is booked as paid.  Because `withdraw` refuses while a payout is
+        pending, and this refuses when none is pending, a position can settle
+        exactly once.
+        """
+        market = self._market(int(market_id))
+        status = int(market.status)
+        if status not in (
+            STATUS_RESOLVED_YES,
+            STATUS_RESOLVED_NO,
+            STATUS_RESOLVED_UNDETERMINED,
+            STATUS_RESOLVED_REFUNDED,
+        ):
+            raise gl.vm.UserError("market is not resolved")
+        position = market.positions.get(gl.message.sender_address)
+        if position is None or int(position.pending) == 0:
+            raise gl.vm.UserError("no payout pending")
+
+        amount = int(position.pending)
+        remaining_yes = int(position.yes) - int(position.settled_yes)
+        remaining_no = int(position.no) - int(position.settled_no)
+        if remaining_yes == 0 and remaining_no == 0:
+            raise gl.vm.UserError("no payout pending")
+
+        position.pending = u256(0)
         position.settled_yes = u256(int(position.yes))
         position.settled_no = u256(int(position.no))
         market.settled_yes_stake = u256(int(market.settled_yes_stake) + remaining_yes)
         market.settled_no_stake = u256(int(market.settled_no_stake) + remaining_no)
 
-        if amount > 0:
-            self.total_paid = u256(int(self.total_paid) + amount)
-            gl.get_contract_at(gl.message.sender_address).emit_transfer(value=u256(amount))
+        self.total_escrowed = u256(int(self.total_escrowed) - amount)
+        self.total_paid = u256(int(self.total_paid) + amount)
+        if int(self.total_paid) > int(self.total_staked):
+            raise gl.vm.UserError("accounting invariant: paid exceeds staked")
 
     # -- views -----------------------------------------------------------
 
@@ -609,6 +684,19 @@ class Falsifiable(gl.Contract):
         )
 
     @gl.public.view
+    def get_pending(self, market_id: u64, account: str) -> u256:
+        """The amount emitted for this account but not yet acknowledged."""
+        market = self._market(int(market_id))
+        try:
+            key = Address(account)
+        except Exception:
+            return u256(0)
+        position = market.positions.get(key)
+        if position is None:
+            return u256(0)
+        return u256(int(position.pending))
+
+    @gl.public.view
     def get_payout_preview(self, market_id: u64, account: str) -> u256:
         """What `withdraw` would pay the account right now."""
         market = self._market(int(market_id))
@@ -618,6 +706,8 @@ class Falsifiable(gl.Contract):
             return u256(0)
         position = market.positions.get(key)
         if position is None:
+            return u256(0)
+        if int(position.pending) > 0:
             return u256(0)
         remaining_yes = int(position.yes) - int(position.settled_yes)
         remaining_no = int(position.no) - int(position.settled_no)
@@ -631,6 +721,16 @@ class Falsifiable(gl.Contract):
     @gl.public.view
     def get_totals(self) -> tuple:
         return (self.total_staked, self.total_paid)
+
+    @gl.public.view
+    def get_ledger(self) -> tuple:
+        """(staked, confirmed paid, emitted but unconfirmed, contract balance)."""
+        return (
+            self.total_staked,
+            self.total_paid,
+            self.total_escrowed,
+            u256(int(self.balance)),
+        )
 
     @gl.public.view
     def get_now(self) -> u64:

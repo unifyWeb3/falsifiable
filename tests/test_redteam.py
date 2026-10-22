@@ -236,6 +236,7 @@ def test_single_sided_pool_refunds(direct_vm, deploy, clock):
     before = int(contract.get_totals()[1])
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     assert int(contract.get_totals()[1]) - before == 5 * GEN
 
 
@@ -267,6 +268,7 @@ def test_rounding_theft_is_impossible(direct_vm, deploy, clock):
     for index in range(3):
         with vm.prank(account(f"w{index}")):
             contract.withdraw(market_id)
+            contract.confirm_delivery(market_id)
     staked, paid = contract.get_totals()
     # The winners took the whole pot, including the loser's money, to the wei.
     assert int(paid) == int(staked)
@@ -291,6 +293,7 @@ def test_double_withdraw_and_reentrancy_are_refused(direct_vm, deploy, clock):
 
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     paid = int(contract.get_totals()[1])
     for _ in range(3):
         with vm.prank(alice):
@@ -318,6 +321,7 @@ def test_unreachable_page_refunds(direct_vm, deploy, clock):
     before = int(contract.get_totals()[1])
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     assert int(contract.get_totals()[1]) - before == 5 * GEN
 
 
@@ -480,6 +484,7 @@ def test_many_tiny_stakes_do_not_break_the_money(direct_vm, deploy, clock):
     for index in range(0, 40, 2):
         with vm.prank(account(f"t{index}")):
             contract.withdraw(market_id)
+            contract.confirm_delivery(market_id)
     staked, paid = contract.get_totals()
     assert int(paid) == int(staked)
 
@@ -518,6 +523,7 @@ def test_no_caller_supplied_beneficiary(direct_vm, deploy, clock):
     # ever settled by Bob.
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     assert int(contract.get_position(market_id, bob.as_hex)[3]) == 0
     assert int(contract.get_position(market_id, alice.as_hex)[2]) == 5 * GEN
 
@@ -580,4 +586,5 @@ def test_a_stale_resolution_falls_back_to_a_refund(direct_vm, deploy, clock):
     before = int(contract.get_totals()[1])
     with vm.prank(alice):
         contract.withdraw(market_id)
+        contract.confirm_delivery(market_id)
     assert int(contract.get_totals()[1]) - before == 5 * GEN

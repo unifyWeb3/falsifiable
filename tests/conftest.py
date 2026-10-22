@@ -103,3 +103,14 @@ def account(name: str):
     from gltest.direct.loader import create_address
 
     return create_address(name)
+
+
+def withdraw_and_confirm(contract, market_id):
+    """Withdraw, then acknowledge delivery.
+
+    `withdraw` only emits the value; `confirm_delivery` is what settles the
+    position and books the payment.  Tests that expect money to move must do
+    both, in the same caller's context.
+    """
+    contract.withdraw(market_id)
+    contract.confirm_delivery(market_id)
