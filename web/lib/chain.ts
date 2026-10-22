@@ -84,18 +84,29 @@ async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   return body.result as T;
 }
 
+/**
+ * Encode the entry object the node expects.
+ *
+ * The Python SDK keys the method name under the empty string
+ * (`make_calldata_object`), and the node on the declared target rejects any
+ * other shape with `malformed_entry`.  `args` is omitted when empty.  The
+ * encoder sorts keys, so the empty key comes first.
+ */
+export function encodeCall(
+  method: string,
+  args: CalldataValue[] = [],
+): Uint8Array {
+  const call: { "": string; args?: CalldataValue[] } = { "": method };
+  if (args.length > 0) call.args = args;
+  return encodeCalldata(call as unknown as CalldataValue);
+}
+
 /** Call a read method on the contract. */
 export async function readContract(
   method: string,
   args: CalldataValue[] = [],
 ): Promise<CalldataValue> {
-  // The object is built exactly the way the Python SDK builds it: `kwargs` is
-  // omitted when it is empty, and the keys are sorted by the encoder.  The
-  // node rejects the call if an empty `kwargs` map is included, so this must
-  // match the SDK byte for byte.
-  const call: { method: string; args?: CalldataValue[] } = { method };
-  if (args.length > 0) call.args = args;
-  const payload = encodeCalldata(call as unknown as CalldataValue);
+  const payload = encodeCall(method, args);
   const serialized = rlpEncodeList([payload, Uint8Array.from([0])]);
   const result = await rpc<string>("gen_call", [
     {

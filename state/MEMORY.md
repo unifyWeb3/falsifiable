@@ -416,8 +416,12 @@ fee) and the contract was **−14 GEN**; after the withdraw the position read
 withdraw and a loser's withdraw both ended `FINISHED_WITH_ERROR`.  All ids in
 `state/LIVE-RESULTS-61997.md`.
 
-**Two bugs found while running it live, both fixed.**  `deploy.py` funded
-accounts with `1000` wei instead of `1000 GEN`; and the RC SDK requires a
-signer even for view calls, so read-only commands now use a fresh in-memory
-key that is never printed or persisted.  A 90-second market window was also
-too short for finality; the run uses 300 seconds.
+**Three bugs found while running it live, all fixed.**  `deploy.py` funded
+accounts with `1000` wei instead of `1000 GEN`; the RC SDK requires a signer
+even for view calls, so read-only commands now use a fresh in-memory key that
+is never printed or persisted; and the web's `gen_call` envelope keyed the
+method name as `"method"`, which the target rejects with `malformed_entry` —
+the Python SDK keys it under the empty string (`make_calldata_object`).  The
+first production Vercel build exposed the third one; `web/lib/chain.test.ts`
+now pins the envelope against SDK-produced byte vectors.  A 90-second market
+window was also too short for finality; the run uses 300 seconds.
