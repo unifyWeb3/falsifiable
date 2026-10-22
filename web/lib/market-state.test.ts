@@ -277,6 +277,57 @@ test("withdraw is offered for exactly the statuses the contract accepts", () => 
   }
 });
 
+test("a payout that was emitted but not confirmed is not offered again", () => {
+  // Positive control: nothing pending and the caller is owed something.
+  assert.equal(
+    deriveActions({
+      status: MARKET_STATUS.RESOLVED_YES,
+      now: 200,
+      closeTime: 200,
+      payoutPreview: 10n,
+    }).canWithdraw,
+    true,
+  );
+  // The contract refuses a second withdraw while the first payout is pending.
+  assert.equal(
+    deriveActions({
+      status: MARKET_STATUS.RESOLVED_YES,
+      now: 200,
+      closeTime: 200,
+      payoutPreview: 0n,
+      pending: 10n,
+    }).canWithdraw,
+    false,
+  );
+});
+
+test("confirm-delivery is offered exactly while a payout is pending", () => {
+  for (const status of RESOLVED_STATUSES) {
+    assert.equal(
+      deriveActions({
+        status,
+        now: 200,
+        closeTime: 200,
+        payoutPreview: 0n,
+        pending: 10n,
+      }).canConfirm,
+      true,
+      "a pending payout must offer confirm-delivery",
+    );
+    assert.equal(
+      deriveActions({
+        status,
+        now: 200,
+        closeTime: 200,
+        payoutPreview: 10n,
+        pending: 0n,
+      }).canConfirm,
+      false,
+      "nothing pending must not offer confirm-delivery",
+    );
+  }
+});
+
 test("every action has both a positive and a negative case", () => {
   const all = [...contractStatuses.values()];
   const beforeClose = (status: number, payoutPreview = 0n) =>
@@ -284,9 +335,24 @@ test("every action has both a positive and a negative case", () => {
   const afterClose = (status: number, payoutPreview = 0n) =>
     deriveActions({ status, now: 500, closeTime: 200, payoutPreview });
 
-  for (const key of ["canStake", "canClose", "canResolve", "canWithdraw"] as const) {
+  for (const key of [
+    "canStake",
+    "canClose",
+    "canResolve",
+    "canWithdraw",
+    "canConfirm",
+  ] as const) {
     const offered = all.some(
-      (status) => beforeClose(status, 1n)[key] || afterClose(status, 1n)[key],
+      (status) =>
+        beforeClose(status, 1n)[key] ||
+        afterClose(status, 1n)[key] ||
+        deriveActions({
+          status,
+          now: 200,
+          closeTime: 200,
+          payoutPreview: 0n,
+          pending: 1n,
+        })[key],
     );
     const refused = all.some(
       (status) => !beforeClose(status, 1n)[key] && !afterClose(status, 1n)[key],

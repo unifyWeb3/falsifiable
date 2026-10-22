@@ -11,6 +11,7 @@ type Position = {
   no: string;
   settledYes: string;
   settledNo: string;
+  pending: string;
 };
 
 type TxState = {
@@ -36,6 +37,7 @@ export function ActionPanel({
   const [address, setAddress] = useState("");
   const [position, setPosition] = useState<Position | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [looking, setLooking] = useState(false);
   // The server's time, so the server HTML and the first client render agree.
@@ -58,6 +60,7 @@ export function ActionPanel({
     now,
     closeTime,
     payoutPreview: preview === null ? 0n : BigInt(preview),
+    pending: pending === null ? 0n : BigInt(pending),
   };
   const actions = deriveActions(input);
 
@@ -77,12 +80,14 @@ export function ActionPanel({
       if (!response.ok) throw new Error(body.error ?? "the lookup failed");
       setPosition(body.position);
       setPreview(body.preview);
+      setPending(body.pending ?? body.position.pending ?? "0");
     } catch (error) {
       setLookupError(
         error instanceof Error ? error.message : "the lookup failed",
       );
       setPosition(null);
       setPreview(null);
+      setPending(null);
     } finally {
       setLooking(false);
     }
@@ -152,7 +157,15 @@ export function ActionPanel({
       key: "withdraw",
       title: "Withdraw",
       command: `${CLI} withdraw --market ${marketId}`,
-      note: "Pays your own position to your own address. Nothing is pushed to you.",
+      note: "Sends your payout to your own address. It is not marked paid until you confirm that it arrived.",
+    });
+  }
+  if (actions.canConfirm) {
+    commands.push({
+      key: "confirm-delivery",
+      title: "Confirm the payout arrived",
+      command: `${CLI} confirm-delivery --market ${marketId}`,
+      note: "Run this from the account that withdrew, after the payout lands. Only this settles the position and books it as paid.",
     });
   }
 
@@ -193,6 +206,10 @@ export function ActionPanel({
             <dd className="num text-right">
               {formatGen(BigInt(preview ?? "0"))} GEN
             </dd>
+            <dt className="label">Sent, awaiting your confirmation</dt>
+            <dd className="num text-right">
+              {formatGen(BigInt(pending ?? "0"))} GEN
+            </dd>
           </dl>
         ) : (
           <p className="mt-2 text-[0.82rem] text-ink-soft">
@@ -207,7 +224,7 @@ export function ActionPanel({
         {commands.length === 0 ? (
           <p className="mt-2 text-[0.9rem] text-ink-mid">
             Nothing to do here right now. Staking is closed, the market is
-            waiting to be ruled on, or you have nothing to withdraw.
+            waiting to be ruled on, or you have nothing to withdraw or confirm.
           </p>
         ) : (
           <div className="mt-2 space-y-4">

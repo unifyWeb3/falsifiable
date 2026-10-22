@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
       readPosition(id, address),
       readPayoutPreview(id, address),
     ]);
-    return NextResponse.json({ position, preview });
+    return NextResponse.json({ position, preview, pending: position.pending });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = error instanceof ConfigError ? 503 : 502;

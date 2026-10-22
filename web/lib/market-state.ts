@@ -53,6 +53,7 @@ export type MarketActions = {
   canClose: boolean;
   canResolve: boolean;
   canWithdraw: boolean;
+  canConfirm: boolean;
 };
 
 export type ActionInput = {
@@ -64,6 +65,11 @@ export type ActionInput = {
   closeTime: number;
   /** What the caller would receive if they withdrew right now, in wei. */
   payoutPreview: bigint;
+  /**
+   * Value the contract has already sent but the payee has not confirmed, in
+   * wei.  A second withdraw is refused while this is non-zero.
+   */
+  pending?: bigint;
 };
 
 /**
@@ -73,11 +79,13 @@ export type ActionInput = {
  *   stake     -> the market must be OPEN and the close time not yet passed
  *   close     -> the market must be OPEN and the close time passed
  *   resolve   -> the market must be OPEN (past its close time) or CLOSED
- *   withdraw  -> the market must be resolved and the caller must be owed
- *                something
+ *   withdraw  -> the market must be resolved, the caller must be owed
+ *                something, and no earlier payout may still be pending
+ *   confirm   -> the caller must have a payout that is pending acknowledgement
  */
 export function deriveActions(input: ActionInput): MarketActions {
   const { status, now, closeTime, payoutPreview } = input;
+  const pending = input.pending ?? 0n;
   const isOpen = status === MARKET_STATUS.OPEN;
   const isClosed = status === MARKET_STATUS.CLOSED;
   const isResolved = RESOLVED_STATUSES.includes(status);
@@ -87,7 +95,8 @@ export function deriveActions(input: ActionInput): MarketActions {
     canStake: isOpen && !pastClose,
     canClose: isOpen && pastClose,
     canResolve: (isOpen && pastClose) || isClosed,
-    canWithdraw: isResolved && payoutPreview > 0n,
+    canWithdraw: isResolved && payoutPreview > 0n && pending === 0n,
+    canConfirm: isResolved && pending > 0n,
   };
 }
 

@@ -30,6 +30,7 @@ export type Position = {
   no: string;
   settledYes: string;
   settledNo: string;
+  pending: string;
 };
 
 export type MarketSummary = {
@@ -106,12 +107,17 @@ export async function readPosition(
   id: number,
   address: string,
 ): Promise<Position> {
-  const raw = asArray(await readContract("get_position", [BigInt(id), address]));
+  const [raw, pending] = await Promise.all([
+    readContract("get_position", [BigInt(id), address]),
+    readContract("get_pending", [BigInt(id), address]),
+  ]);
+  const fields = asArray(raw);
   return {
-    yes: asBigInt(raw[0]).toString(),
-    no: asBigInt(raw[1]).toString(),
-    settledYes: asBigInt(raw[2]).toString(),
-    settledNo: asBigInt(raw[3]).toString(),
+    yes: asBigInt(fields[0]).toString(),
+    no: asBigInt(fields[1]).toString(),
+    settledYes: asBigInt(fields[2]).toString(),
+    settledNo: asBigInt(fields[3]).toString(),
+    pending: asBigInt(pending).toString(),
   };
 }
 
